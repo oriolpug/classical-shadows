@@ -29,6 +29,8 @@ import numpy as np
 import maestro
 from maestro.circuits import QuantumCircuit
 
+HANDOFF = not '--no-handoff' in sys.argv
+
 from helpers import (
     Config, get_nn_bonds, build_pauli_observable,
     build_tfim_trotter_circuit, append_random_clifford_layer,
@@ -209,7 +211,7 @@ def demonstrate_tgate_transition(config):
 # Act 3: Adaptive bond dimension handoff
 # ─────────────────────────────────────────────────────────────────────
 
-def time_evolve_with_handoff(config):
+def time_evolve_with_handoff(config, handoff, gpu):
     """CPU→GPU bond dimension handoff during TFIM time evolution."""
     header("ACT 3: THE HANDOFF — Adaptive Bond Dimension")
     n = config.n_qubits
@@ -269,7 +271,7 @@ def time_evolve_with_handoff(config):
             print(f"  t = {t_sim:5.2f}  |  E(t) = {energy:10.4f}  |  "
                   f"{label}  |  {elapsed:.3f}s")
 
-        if not switched and step >= 2:
+        if not switched and step >= 2 and handoff:
             if abs(energies[-1] - energies[-2]) > config.entanglement_threshold:
                 switched = True
                 print(f"\n  ⚡ Handoff: {low_label} → {high_label} at t = {t_sim:.2f}")
@@ -399,96 +401,96 @@ if __name__ == '__main__':
     demonstrate_tgate_transition(config)
 
     # ── Act 3: Adaptive bond dimension handoff ──
-    energies, sim_times, backends = time_evolve_with_handoff(config)
+    energies, sim_times, backends = time_evolve_with_handoff(config, handoff=HANDOFF, gpu=config.use_gpu)
 
     # ── Acts 4-5: Shadow pipeline demo ──
     demonstrate_shadow_pipeline(config)
 
     # ── Act 6: MPS Sniper — shadow sweep on hot AND cold subsystems ──
+    if '--shadows' in sys.argv:
+        header("ACT 6: MPS SNIPER — Entanglement Growth Sweep")
+        print(f"  PP scout selected: HOT={hot_qubits}  COLD={cold_qubits}")
+        print(f"  Running shadows on both to validate the scout...\n")
 
-    header("ACT 6: MPS SNIPER — Entanglement Growth Sweep")
-    print(f"  PP scout selected: HOT={hot_qubits}  COLD={cold_qubits}")
-    print(f"  Running shadows on both to validate the scout...\n")
+        hot_results = shadow_entanglement_sweep(
+            config, hot_qubits, label="🎯 HOT (PP-selected)"
+        )
+        cold_results = shadow_entanglement_sweep(
+            config, cold_qubits, label="❄️  COLD (contrast)"
+        )
 
-    hot_results = shadow_entanglement_sweep(
-        config, hot_qubits, label="🎯 HOT (PP-selected)"
-    )
-    cold_results = shadow_entanglement_sweep(
-        config, cold_qubits, label="❄️  COLD (contrast)"
-    )
-
-    # ── Exact ED (if feasible) ──
-    header("GENERATING VISUALIZATIONS")
-    hot_exact, cold_exact = None, None
-    if config.n_qubits <= 20:
-        print("  Computing exact ED reference...")
-        hot_exact = compute_exact_s2(config, hot_qubits)
-        cold_exact = compute_exact_s2(config, cold_qubits)
-        print("  ✓ Exact reference computed for both subsystems.")
-    else:
-        print(f"  ℹ Exact ED skipped (n={config.n_qubits} > 20)")
-        print(f"  Classical shadows are the ONLY way to estimate S₂ at this scale!")
-
-    # ── Plots ──
-    energy_path = plot_energy_evolution(
-        sim_times, energies, backends,
-        os.path.join(SCRIPT_DIR, 'energy_evolution.png'),
-    )
-    print(f"  📊 Saved: {energy_path}")
-
-    comparison_path = plot_scout_comparison(
-        hot_results, cold_results,
-        hot_exact, cold_exact,
-        hot_qubits, cold_qubits,
-        config,
-        os.path.join(SCRIPT_DIR, 'entanglement_growth.png'),
-    )
-    print(f"  📊 Saved: {comparison_path}")
-
-    # ── MAE ──
-    if hot_exact:
-        hot_mae = np.mean([abs(s - e) for s, e in
-                           zip(hot_results['s2'], hot_exact['s2'])])
-        cold_mae = np.mean([abs(s - e) for s, e in
-                            zip(cold_results['s2'], cold_exact['s2'])])
-        print(f"\n  MAE vs exact:  HOT = {hot_mae:.3f}  |  COLD = {cold_mae:.3f}")
-
-    # ── Summary ──
-    total_elapsed = time.time() - total_start
-    header("SHOWCASE COMPLETE")
-    print(f"  System: {config.lx}×{config.ly} = {config.n_qubits} qubits")
-    print(f"  GPU: {'Yes' if config.use_gpu else 'No'}")
-    print(f"  Total runtime: {total_elapsed:.1f}s\n")
-    print(f"  Scout → Sniper pipeline:")
-    print(f"    Act 1: PP scouted {config.n_qubits} qubits in {scout_time:.3f}s"
-          f" → HOT={hot_qubits}, COLD={cold_qubits}")
-    print(f"    Act 2: T-gates broke Clifford → MPS takeover")
-    print(f"    Act 3: Adaptive χ handoff (CPU → "
-          f"{'GPU' if config.use_gpu else 'high-bond CPU'})")
-    print(f"    Act 6: Shadows on HOT vs COLD subsystems "
-          f"({config.n_shadows} snapshots each)")
-    if hot_exact:
-        hot_mean = np.mean(hot_results['s2'])
-        cold_mean = np.mean(cold_results['s2'])
-        diff = hot_mean - cold_mean
-        print(f"\n  Entanglement comparison:")
-        print(f"    HOT  avg S₂ = {hot_mean:.3f}  (PP-selected, |⟨ZZ⟩| = "
-              f"{abs(scout['hot_corr']):.4f})")
-        print(f"    COLD avg S₂ = {cold_mean:.3f}  (weakest corr., |⟨ZZ⟩| = "
-              f"{abs(scout['cold_corr']):.4f})")
-        if abs(diff) > 0.1:
-            winner = "HOT" if diff > 0 else "COLD"
-            print(f"    → Scout {'confirmed' if diff > 0 else 'overridden'}: "
-                  f"{winner} has more entanglement (ΔS₂ = {abs(diff):.3f})")
+        # ── Exact ED (if feasible) ──
+        header("GENERATING VISUALIZATIONS")
+        hot_exact, cold_exact = None, None
+        if config.n_qubits <= 20:
+            print("  Computing exact ED reference...")
+            hot_exact = compute_exact_s2(config, hot_qubits)
+            cold_exact = compute_exact_s2(config, cold_qubits)
+            print("  ✓ Exact reference computed for both subsystems.")
         else:
-            print(f"    → Both subsystems show similar entanglement "
-                  f"(ΔS₂ = {abs(diff):.3f})")
-            if config.n_qubits <= 20:
-                print(f"    → This is expected on a small {config.lx}×{config.ly} "
-                      f"lattice; contrast grows on larger systems")
-    print(f"\n  📊 {energy_path}")
-    print(f"  📊 {comparison_path}")
-    print(f"\n  PP scouts, MPS targets — Maestro orchestrates it all. 🎼")
+            print(f"  ℹ Exact ED skipped (n={config.n_qubits} > 20)")
+            print(f"  Classical shadows are the ONLY way to estimate S₂ at this scale!")
+
+        # ── Plots ──
+        energy_path = plot_energy_evolution(
+            sim_times, energies, backends,
+            os.path.join(SCRIPT_DIR, 'energy_evolution.png'),
+        )
+        print(f"  📊 Saved: {energy_path}")
+
+        comparison_path = plot_scout_comparison(
+            hot_results, cold_results,
+            hot_exact, cold_exact,
+            hot_qubits, cold_qubits,
+            config,
+            os.path.join(SCRIPT_DIR, 'entanglement_growth.png'),
+        )
+        print(f"  📊 Saved: {comparison_path}")
+
+        # ── MAE ──
+        if hot_exact:
+            hot_mae = np.mean([abs(s - e) for s, e in
+                               zip(hot_results['s2'], hot_exact['s2'])])
+            cold_mae = np.mean([abs(s - e) for s, e in
+                                zip(cold_results['s2'], cold_exact['s2'])])
+            print(f"\n  MAE vs exact:  HOT = {hot_mae:.3f}  |  COLD = {cold_mae:.3f}")
+
+        # ── Summary ──
+        total_elapsed = time.time() - total_start
+        header("SHOWCASE COMPLETE")
+        print(f"  System: {config.lx}×{config.ly} = {config.n_qubits} qubits")
+        print(f"  GPU: {'Yes' if config.use_gpu else 'No'}")
+        print(f"  Total runtime: {total_elapsed:.1f}s\n")
+        print(f"  Scout → Sniper pipeline:")
+        print(f"    Act 1: PP scouted {config.n_qubits} qubits in {scout_time:.3f}s"
+              f" → HOT={hot_qubits}, COLD={cold_qubits}")
+        print(f"    Act 2: T-gates broke Clifford → MPS takeover")
+        print(f"    Act 3: Adaptive χ handoff (CPU → "
+              f"{'GPU' if config.use_gpu else 'high-bond CPU'})")
+        print(f"    Act 6: Shadows on HOT vs COLD subsystems "
+              f"({config.n_shadows} snapshots each)")
+        if hot_exact:
+            hot_mean = np.mean(hot_results['s2'])
+            cold_mean = np.mean(cold_results['s2'])
+            diff = hot_mean - cold_mean
+            print(f"\n  Entanglement comparison:")
+            print(f"    HOT  avg S₂ = {hot_mean:.3f}  (PP-selected, |⟨ZZ⟩| = "
+                  f"{abs(scout['hot_corr']):.4f})")
+            print(f"    COLD avg S₂ = {cold_mean:.3f}  (weakest corr., |⟨ZZ⟩| = "
+                  f"{abs(scout['cold_corr']):.4f})")
+            if abs(diff) > 0.1:
+                winner = "HOT" if diff > 0 else "COLD"
+                print(f"    → Scout {'confirmed' if diff > 0 else 'overridden'}: "
+                      f"{winner} has more entanglement (ΔS₂ = {abs(diff):.3f})")
+            else:
+                print(f"    → Both subsystems show similar entanglement "
+                      f"(ΔS₂ = {abs(diff):.3f})")
+                if config.n_qubits <= 20:
+                    print(f"    → This is expected on a small {config.lx}×{config.ly} "
+                          f"lattice; contrast grows on larger systems")
+        print(f"\n  📊 {energy_path}")
+        print(f"  📊 {comparison_path}")
+        print(f"\n  PP scouts, MPS targets — Maestro orchestrates it all. 🎼")
 
     # ── Optional benchmark: honest efficiency metrics ──
     if '--benchmark' in sys.argv:

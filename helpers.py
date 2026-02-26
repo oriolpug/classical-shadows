@@ -374,7 +374,7 @@ def collect_shadow_snapshots(
             simulator_type=config.simulator_type,
             simulation_type=maestro.SimulationType.MatrixProductState,
             shots=1,
-            max_bond_dimension=config.chi_high if config.use_gpu else config.chi_low,
+            max_bond_dimension=config.chi_high,
         )
         bitstring = list(result['counts'].keys())[0]
         bits = [int(b) for b in bitstring[:n]]
