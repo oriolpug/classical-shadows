@@ -245,6 +245,57 @@ def compute_reference(
     """
     n = config.n_qubits
 
+    if config.ly == 1:
+        z_indices = [i for i, char in enumerate(obs_str) if char == 'Z']
+        if len(z_indices) != 2:
+            raise ValueError("Free fermion fast-path requires exactly two Z operators.")
+
+        q_i, q_j = z_indices[0], z_indices[1]
+        if q_j != q_i + 1:
+            raise ValueError("Free fermion fast-path currently only supports nearest-neighbor bonds.")
+
+        # Precompute rotation angles
+        theta_zz = 2.0 * config.j_coupling * config.dt
+        cos_zz, sin_zz = np.cos(theta_zz), np.sin(theta_zz)
+
+        theta_x = 2.0 * config.h_field * config.dt
+        cos_x, sin_x = np.cos(theta_x), np.sin(theta_x)
+
+        # Initialize the two observable vectors for Z_i Z_{i+1}
+        a, b = 2 * q_i + 1, 2 * q_j
+        v_a = np.zeros(2 * n, dtype=float)
+        v_b = np.zeros(2 * n, dtype=float)
+        v_a[a] = 1.0
+        v_b[b] = 1.0
+
+        # Heisenberg picture: evolve observables backwards
+        for _ in range(n_steps):
+            # Reverse of X gates
+            for k in reversed(range(n)):
+                i, j = 2 * k, 2 * k + 1
+                va_i, va_j = v_a[i], v_a[j]
+                v_a[i] = va_i * cos_x - va_j * sin_x
+                v_a[j] = va_i * sin_x + va_j * cos_x
+
+                vb_i, vb_j = v_b[i], v_b[j]
+                v_b[i] = vb_i * cos_x - vb_j * sin_x
+                v_b[j] = vb_i * sin_x + vb_j * cos_x
+
+            # Reverse of ZZ gates
+            for k in reversed(range(n - 1)):
+                i, j = 2 * k + 1, 2 * k + 2
+                va_i, va_j = v_a[i], v_a[j]
+                v_a[i] = va_i * cos_zz - va_j * sin_zz
+                v_a[j] = va_i * sin_zz + va_j * cos_zz
+
+                vb_i, vb_j = v_b[i], v_b[j]
+                v_b[i] = vb_i * cos_zz - vb_j * sin_zz
+                v_b[j] = vb_i * sin_zz + vb_j * cos_zz
+
+        # ⟨Z_i Z_j⟩ = - (v_a * Gamma(0) * v_b^T)
+        expectation = -np.sum(v_a[1::2] * v_b[0::2] - v_a[0::2] * v_b[1::2])
+        return float(expectation)
+
     if n <= SV_LIMIT:
         qc = build_tfim_trotter_circuit(
             n, bonds, config.j_coupling, config.h_field, config.dt, n_steps
@@ -282,6 +333,7 @@ def sweep_shadow_accuracy(
         obs_str: str,
         ref_value: float,
         m_values: List[int],
+        shadow_limit_time: float,
 ) -> List[dict]:
     """
     Sweep shadow snapshot counts M and measure MAE vs reference.
@@ -353,8 +405,10 @@ def sweep_shadow_accuracy(
         results.append({'m': m, 'mean': mean, 'std_err': std_err, 'mae': mae,
                         'elapsed': snapshot_elapsed[m - 1], 'n_blocks': n_bootstraps})
 
-    return results
+        if snapshot_elapsed[m - 1] > shadow_limit_time:
+            break
 
+    return results
 
 # ─────────────────────────────────────────────────────────────────────
 # MPS accuracy sweep

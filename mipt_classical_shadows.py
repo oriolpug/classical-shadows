@@ -62,22 +62,38 @@ def build_config():
     """Parse CLI args and return Config."""
     use_gpu = '--gpu' in sys.argv
     small = '--small' in sys.argv
+    chain = '--chain' in sys.argv
 
     if small:
-        return Config(
-            lx=4, ly=4,
-            n_trotter_steps=6,
-            chi_low=16, chi_high=32,
-            use_gpu=use_gpu,
-        )
+        if chain:
+            return Config(
+                lx=16, ly=1,
+                n_trotter_steps=6,
+                chi_low=16, chi_high=32,
+                use_gpu=use_gpu,
+            )
+        else:
+            return Config(
+                lx=4, ly=4,
+                n_trotter_steps=6,
+                chi_low=16, chi_high=32,
+                use_gpu=use_gpu,
+            )
     else:
-        return Config(
-            lx=6, ly=6,
-            n_trotter_steps=8,
-            chi_low=16, chi_high=64,
-            use_gpu=use_gpu,
-        )
-
+        if chain:
+            return Config(
+                lx=36, ly=1,
+                n_trotter_steps=8,
+                chi_low=16, chi_high=64,
+                use_gpu=use_gpu,
+            )
+        else:
+            return Config(
+                lx=6, ly=6,
+                n_trotter_steps=8,
+                chi_low=16, chi_high=64,
+                use_gpu=use_gpu,
+            )
 
 # ─────────────────────────────────────────────────────────────────────
 # Main
@@ -89,6 +105,7 @@ if __name__ == '__main__':
     total_start = time.time()
 
     small = '--small' in sys.argv
+    chain = '--chain' in sys.argv
     n = config.n_qubits
     bonds = get_nn_bonds(config.lx, config.ly)
 
@@ -106,7 +123,12 @@ if __name__ == '__main__':
 
     # ── Act 1: Reference value (cached) ──
     header("ACT 1: REFERENCE VALUE")
-    ref_label = "exact statevector (numpy)" if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
+    if chain:
+        ref_label = """exact value known: \n
+                        ⟨Z_i Z_{i+1}⟩ = -Γ_{2i+1, 2i+2}          (nearest-neighbour, simplest case) \n                                                                                                                                                     │)
+                        ⟨Z_i Z_j⟩ = Pfaffian(Γ_{2i+1..2j, 2i+1..2j})   (general case, Wick's theorem)  """
+    else:
+        ref_label = "exact statevector " if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
 
     cache_key = hashlib.md5(
         f"{config.lx},{config.ly},{config.j_coupling},{config.h_field},"
@@ -136,31 +158,8 @@ if __name__ == '__main__':
     print(f"\n  ⟨Z_{q_i} Z_{q_j}⟩ = {ref_value:+.6f}"
           + (f"  ({ref_time:.2f}s)" if ref_time else "  (cached)"))
 
-    # ── Act 2: Shadow accuracy sweep ──
-    header("ACT 2: CLASSICAL SHADOWS — Accuracy vs Snapshots M")
-    if small:
-        m_values = [10, 25, 50, 100, 200, 400, 800]
-    else:
-        m_values = [10, 25, 50, 100, 200]
-
-    print(f"  M values: {m_values}")
-    backend_label = "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high}"
-    print(f"  Each snapshot: TFIM circuit + random Clifford layer + 1-shot {backend_label}\n")
-
-    t0 = time.time()
-    shadow_results = sweep_shadow_accuracy(
-        config, fixed_depth, bonds, obs_dict, obs_str, ref_value, m_values
-    )
-    shadow_time = time.time() - t0
-
-    print(f"\n  Done in {shadow_time:.1f}s")
-    print(f"\n  {'M':>6}  {'Mean ⟨ZZ⟩':>12}  {'Std err':>10}  {'MAE':>10}")
-    print(f"  {'──────':>6}  {'────────────':>12}  {'──────────':>10}  {'──────────':>10}")
-    for r in shadow_results:
-        print(f"  {r['m']:>6d}  {r['mean']:>+12.6f}  {r['std_err']:>10.6f}  {r['mae']:>10.6f}")
-
-    # ── Act 3: MPS accuracy sweep ──
-    header("ACT 3: MPS — Accuracy vs Bond Dimension χ")
+    # ── Act 2: MPS accuracy sweep ──
+    header("ACT 2: MPS — Accuracy vs Bond Dimension χ")
     if small:
         chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256]
     else:
@@ -181,6 +180,31 @@ if __name__ == '__main__':
     print(f"  {'──':>6}  {'────':>12}  {'──────────':>10}  {'──────────':>10}")
     for r in mps_results:
         print(f"  {r['chi']:>6d}  {r['value']:>+12.6f}  {r['mae']:>10.6f}  {r['elapsed']:>10.3f}")
+
+    shadows_limit_time = 2 * mps_time
+
+    # ── Act 3: Shadow accuracy sweep ──
+    header("ACT 3: CLASSICAL SHADOWS — Accuracy vs Snapshots M")
+    if small:
+        m_values = [10, 25, 50, 100, 200, 400, 800]
+    else:
+        m_values = [10, 25, 50, 100, 200]
+
+    print(f"  M values: {m_values}")
+    backend_label = "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high}"
+    print(f"  Each snapshot: TFIM circuit + random Clifford layer + 1-shot {backend_label}\n")
+
+    t0 = time.time()
+    shadow_results = sweep_shadow_accuracy(
+        config, fixed_depth, bonds, obs_dict, obs_str, ref_value, m_values, shadows_limit_time
+    )
+    shadow_time = time.time() - t0
+
+    print(f"\n  Done in {shadow_time:.1f}s")
+    print(f"\n  {'M':>6}  {'Mean ⟨ZZ⟩':>12}  {'Std err':>10}  {'MAE':>10}")
+    print(f"  {'──────':>6}  {'────────────':>12}  {'──────────':>10}  {'──────────':>10}")
+    for r in shadow_results:
+        print(f"  {r['m']:>6d}  {r['mean']:>+12.6f}  {r['std_err']:>10.6f}  {r['mae']:>10.6f}")
 
     # ── Act 4: Plot + summary ──
     header("ACT 4: VISUALIZING THE COMPARISON")
@@ -211,16 +235,16 @@ if __name__ == '__main__':
     best_shadow = min(shadow_results, key=lambda r: r['mae'])
     print(f"  Shadows best MAE = {best_shadow['mae']:.4f} at M = {best_shadow['m']}")
     best_mps = min(mps_results, key=lambda r: r['mae'])
-    print(f"  MPS     best MAE = {best_mps['mae']:.4f} at chi = {best_shadow['chi']}")
+    print(f"  MPS     best MAE = {best_mps['mae']:.4f} at chi = {best_mps['chi']}")
 
     # if chi_thresh:
     #     print(f"  MPS     reaches MAE < {eps} at χ = {chi_thresh}")
     #     best_mps = min(mps_results, key=lambda r: r['mae'])
     #     print(f"  MPS best MAE = {best_mps['mae']:.4f} at χ = {best_mps['chi']}")
 
-    if best_mps['mae'] > best_shadow['mae']:
+    if best_mps['mae'] < best_shadow['mae']:
         print(f"\n  → MPS wins!")
-    elif best_mps['mae'] < best_shadow['mae']:
+    elif best_mps['mae'] > best_shadow['mae']:
         print(f"\n  → Classical shadows wins!")
     else:
         print(f"\n  → Tie!")
