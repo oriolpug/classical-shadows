@@ -62,6 +62,7 @@ def build_config():
     """Parse CLI args and return Config."""
     use_gpu = '--gpu' in sys.argv
     small = '--small' in sys.argv
+    big = '--big' in sys.argv
     chain = '--chain' in sys.argv
 
     if small:
@@ -77,6 +78,21 @@ def build_config():
                 lx=4, ly=4,
                 n_trotter_steps=6,
                 chi_low=16, chi_high=32,
+                use_gpu=use_gpu,
+            )
+    elif big:
+        if chain:
+            return Config(
+                lx=64, ly=1,
+                n_trotter_steps=10,
+                chi_low=16, chi_high=128,
+                use_gpu=use_gpu,
+            )
+        else:
+            return Config(
+                lx=8, ly=8,
+                n_trotter_steps=10,
+                chi_low=16, chi_high=128,
                 use_gpu=use_gpu,
             )
     else:
