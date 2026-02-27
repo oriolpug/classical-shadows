@@ -166,7 +166,7 @@ if __name__ == '__main__':
         chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 
     print(f"  χ values: {chi_values}")
-    reference_parameter = "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
+    reference_parameter = "exact" if chain else "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
     print(f"  Reference {reference_parameter}\n")
 
     t0 = time.time()

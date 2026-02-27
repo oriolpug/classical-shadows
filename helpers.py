@@ -405,8 +405,8 @@ def sweep_shadow_accuracy(
         results.append({'m': m, 'mean': mean, 'std_err': std_err, 'mae': mae,
                         'elapsed': snapshot_elapsed[m - 1], 'n_blocks': n_bootstraps})
 
-        if snapshot_elapsed[m - 1] > shadow_limit_time:
-            break
+        # if snapshot_elapsed[m - 1] > shadow_limit_time:
+        #     break
 
     return results
 
