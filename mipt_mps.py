@@ -179,11 +179,11 @@ if __name__ == '__main__':
     # ── Act 2: MPS accuracy sweep ──
     header("ACT 2: MPS — Accuracy vs Bond Dimension χ")
     if small:
-        chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+        chi_values = [1, 2, 4, 8, 16, 32, 64, 128]
     elif big:
-        chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
-    else:
         chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    else:
+        chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256]
     print(f"  χ values: {chi_values}")
     print(f"  Reference {ref_label}\n")
 
