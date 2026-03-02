@@ -144,7 +144,7 @@ if __name__ == '__main__':
                         ⟨Z_i Z_{i+1}⟩ = -Γ_{2i+1, 2i+2}          (nearest-neighbour, simplest case) \n                                                                                                                                                     │)
                         ⟨Z_i Z_j⟩ = Pfaffian(Γ_{2i+1..2j, 2i+1..2j})   (general case, Wick's theorem)  """
     else:
-        ref_label = "exact statevector " if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
+        ref_label = "exact statevector " if n <= SV_LIMIT else f"MPS chi={2 ** int(log2(np.sqrt(4*10 ** 9 / (2 * n * 8))))}"
 
     cache_key = hashlib.md5(
         f"{config.lx},{config.ly},{config.j_coupling},{config.h_field},"

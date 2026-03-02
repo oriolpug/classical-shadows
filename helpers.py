@@ -310,7 +310,7 @@ def compute_reference(
 
     else:
         # Calculate max chi so that we don't run out of memory
-        max_chi = int(log2(np.sqrt(4*10 ** 9 / (2 * n * 8))))
+        max_chi = 2 ** int(log2(np.sqrt(4*10 ** 9 / (2 * n * 8))))
         qc = build_tfim_trotter_circuit(
             n, bonds, config.j_coupling, config.h_field, config.dt, n_steps
         )
