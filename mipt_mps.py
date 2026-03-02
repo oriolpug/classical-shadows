@@ -179,7 +179,7 @@ if __name__ == '__main__':
     if small:
         chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256]
     else:
-        chi_values = range(128, 513, 16)
+        chi_values = range(128, 513, 64)
 
     print(f"  χ values: {chi_values}")
     reference_parameter = "exact" if chain else "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
