@@ -308,7 +308,7 @@ def compute_reference(
         return float(result['expectation_values'][0])
 
     else:
-        chi_ref = config.chi_high * 2
+        chi_ref = 256
         qc = build_tfim_trotter_circuit(
             n, bonds, config.j_coupling, config.h_field, config.dt, n_steps
         )

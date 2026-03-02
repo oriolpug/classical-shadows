@@ -85,14 +85,14 @@ def build_config():
             return Config(
                 lx=64, ly=1,
                 n_trotter_steps=10,
-                chi_low=16, chi_high=128,
+                chi_low=16, chi_high=512,
                 use_gpu=use_gpu,
             )
         else:
             return Config(
                 lx=8, ly=8,
                 n_trotter_steps=10,
-                chi_low=16, chi_high=128,
+                chi_low=16, chi_high=512,
                 use_gpu=use_gpu,
             )
     else:
@@ -100,14 +100,14 @@ def build_config():
             return Config(
                 lx=36, ly=1,
                 n_trotter_steps=8,
-                chi_low=16, chi_high=64,
+                chi_low=16, chi_high=256,
                 use_gpu=use_gpu,
             )
         else:
             return Config(
                 lx=6, ly=6,
                 n_trotter_steps=8,
-                chi_low=16, chi_high=64,
+                chi_low=16, chi_high=256,
                 use_gpu=use_gpu,
             )
 
