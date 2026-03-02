@@ -202,7 +202,7 @@ if __name__ == '__main__':
     # ── Act 4: Plot + summary ──
     header("VISUALIZING THE COMPARISON")
     obs_label = f'⟨Z_{q_i} Z_{q_j}⟩'
-    file_name = "accuracy_vs_resources_mps" + small * "_small" + chain * "_chain" + config.use_gpu * "_gpu"
+    file_name = "accuracy_vs_resources_mps" + small * "_small" + big * "_big" + chain * "_chain" + config.use_gpu * "_gpu"
     plot_path = plot_one(
         mps_results,
         obs_label, ref_value, config,
