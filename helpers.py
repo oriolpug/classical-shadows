@@ -318,7 +318,7 @@ def compute_reference(
             simulator_type=config.simulator_type,
             simulation_type=maestro.SimulationType.MatrixProductState,
             observables=[obs_str],
-            max_bond_dimension=chi_ref,
+            max_bond_dimension=max_chi,
         )
         return float(result['expectation_values'][0])
 
