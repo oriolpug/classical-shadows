@@ -13,6 +13,7 @@ import maestro
 from maestro.circuits import QuantumCircuit
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
+from math import log2
 
 import matplotlib
 matplotlib.use('Agg')
@@ -308,7 +309,8 @@ def compute_reference(
         return float(result['expectation_values'][0])
 
     else:
-        chi_ref = 256
+        # Calculate max chi so that we don't run out of memory
+        max_chi = int(log2(np.sqrt(4*10 ** 9 / (2 * n * 8))))
         qc = build_tfim_trotter_circuit(
             n, bonds, config.j_coupling, config.h_field, config.dt, n_steps
         )

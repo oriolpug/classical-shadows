@@ -21,6 +21,7 @@ import json
 import hashlib
 
 import numpy as np
+from math import log2
 
 from helpers import (
     Config, site_index, get_nn_bonds, build_pauli_observable,
@@ -122,6 +123,7 @@ if __name__ == '__main__':
 
     small = '--small' in sys.argv
     chain = '--chain' in sys.argv
+    big = '--big' in sys.argv
     n = config.n_qubits
     bonds = get_nn_bonds(config.lx, config.ly)
 
@@ -144,7 +146,7 @@ if __name__ == '__main__':
                         ⟨Z_i Z_{i+1}⟩ = -Γ_{2i+1, 2i+2}          (nearest-neighbour, simplest case) \n                                                                                                                                                     │)
                         ⟨Z_i Z_j⟩ = Pfaffian(Γ_{2i+1..2j, 2i+1..2j})   (general case, Wick's theorem)  """
     else:
-        ref_label = "exact statevector " if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
+        ref_label = "exact statevector " if n <= SV_LIMIT else f"MPS chi={int(log2(np.sqrt(4*10 ** 9 / (2 * n * 8))))}"
 
     cache_key = hashlib.md5(
         f"{config.lx},{config.ly},{config.j_coupling},{config.h_field},"
@@ -178,12 +180,12 @@ if __name__ == '__main__':
     header("ACT 2: MPS — Accuracy vs Bond Dimension χ")
     if small:
         chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    elif big:
+        chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
     else:
-        chi_values = range(128, 513, 64)
-
+        chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
     print(f"  χ values: {chi_values}")
-    reference_parameter = "exact" if chain else "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
-    print(f"  Reference {reference_parameter}\n")
+    print(f"  Reference {ref_label}\n")
 
     t0 = time.time()
     mps_results = sweep_mps_accuracy(
