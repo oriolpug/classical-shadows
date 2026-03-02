@@ -562,3 +562,96 @@ def plot_accuracy_vs_resources(
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
     return save_path
+
+def plot_one(
+    data: List[dict],
+    obs_label: str,
+    ref_value: float,
+    config: Config,
+    save_path: str,
+) -> str:
+    """
+    Two-panel figure comparing classical shadows and MPS accuracy:
+      Left:  MAE vs M (shadow snapshots), log-log. Slope ≈ −0.5.
+      Right: MAE vs χ (bond dimension), log-log. Rapid convergence.
+    Both panels share the same y-axis range so the gap is obvious.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(13, 5.5))
+
+    maes = [max(r['mae'], 1e-8) for r in data]
+    times = [r['elapsed'] for r in data]
+    if 'chi' in data[0].keys():
+        ticks = [r['chi'] for r in data]
+    elif 'm' in data[0].keys():
+        ticks = [r['m'] for r in data]
+    else:
+        raise ValueError("Wrong data type passed")
+
+    ymin = min(maes) * 0.3
+    ymax = max(maes) * 4.0
+    t_max = max(times) * 1.15
+
+    TIME_COLOR = '#E65100'   # orange for time lines
+
+    def _add_time_axis(base_ax, x_vals, t_vals, time_label):
+        """Attach a right-side time axis with shared [0, t_max] scale."""
+        axr = base_ax.twinx()
+        axr.plot(x_vals, t_vals, 's--', color=TIME_COLOR, linewidth=1.5,
+                 markersize=6, alpha=0.8, label=time_label)
+        axr.set_ylabel('Time (s)', fontsize=10, color=TIME_COLOR)
+        axr.tick_params(axis='y', labelcolor=TIME_COLOR)
+        axr.set_ylim(0, t_max)
+
+        return axr
+
+    # ── Left: MAE vs M (log-log) ──
+    ax.loglog(ticks, maes, 'o-', color='#7B1FA2', linewidth=2.5,
+               markersize=8, label='MAE')
+    M_arr = np.array(ticks, dtype=float)
+    ax.set_xlabel('Shadow snapshots M', fontsize=11)
+    ax.set_ylabel('MAE vs reference', fontsize=11)
+    ax.set_title(
+        f'Classical Shadows: MAE vs M\n'
+        f'(depth={config.n_trotter_steps}, {config.lx}×{config.ly} TFIM)',
+        fontsize=11,
+    )
+    ax.set_xticks(M_arr)
+    ax.set_xticklabels([str(int(M)) for M in M_arr])
+    ax.set_ylim(ymin, ymax)
+    ax.grid(True, which='both', alpha=0.3)
+    ax_twin = _add_time_axis(ax, ticks, times, 'Time for M snapshots (s)')
+
+
+    lh, ll = ax.get_legend_handles_labels()
+    lhr, llr = ax_twin.get_legend_handles_labels()
+    ax.legend(lh + lhr, ll + llr, loc='best', fontsize=9)
+
+    # ── ε = 0.05 threshold line ──
+    # eps = 0.05
+    # if ymin < eps < ymax:
+    #     for ax in (ax1, ax2):
+    #         ax.axhline(y=eps, color='red', linestyle=':', alpha=0.6, linewidth=1.5)
+    #
+    #     ax1.text(m_vals[0] * 1.3, eps * 1.5, f'ε={eps}', color='red', fontsize=9)
+    #     ax2.text(chi_vals[0] * 1.3, eps * 1.5, f'ε={eps}', color='red', fontsize=9)
+
+    # ── Footer annotation ──
+    # m_thresh = next((r['m'] for r in shadow_results if r['mae'] < eps), None)
+    # chi_thresh = next((r['chi'] for r in mps_results if r['mae'] < eps), None)
+    # parts = []
+    # if m_thresh:
+    #     parts.append(f'Shadows reach ε={eps} at M={m_thresh}')
+    # if chi_thresh:
+    #     parts.append(f'MPS reaches ε={eps} at χ={chi_thresh}')
+    # if parts:
+    #     fig.text(0.5, 0.01, '  |  '.join(parts),
+    #              ha='center', fontsize=10, style='italic', color='#333333')
+
+    fig.suptitle(
+        f'Classical Shadows vs MPS — {obs_label} (central bond correlation) (ref = {ref_value:.4f})',
+        fontsize=13, fontweight='bold',
+    )
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    return save_path

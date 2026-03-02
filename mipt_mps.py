@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""
+MPS Exclusive Run — Accuracy vs Resources
+=================================================
+
+Both methods estimate ⟨Z_i Z_j⟩ on a central bond of a 2D TFIM.
+The demo sweeps resources (M snapshots for shadows, χ for MPS) and
+shows that MPS converges to the correct answer with far fewer resources.
+
+Usage:
+    python mipt_mps.py --small        # 4×4 = 16 qubits (~5-10 min)
+    python mipt_mps.py --small --gpu  # GPU acceleration
+    python mipt_mps.py                # 6×6 = 36 qubits (GPU workstation)
+    python mipt_mps.py --gpu          # full 6×6 with GPU
+"""
+
+import sys
+import os
+import time
+import json
+import hashlib
+
+import numpy as np
+
+from helpers import (
+    Config, site_index, get_nn_bonds, build_pauli_observable,
+    PAULI_Z,
+    compute_reference, sweep_shadow_accuracy, sweep_mps_accuracy,
+    plot_accuracy_vs_resources, SV_LIMIT, plot_one
+)
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Printing helpers
+# ─────────────────────────────────────────────────────────────────────
+
+def header(title):
+    print(f"\n{'═' * 65}")
+    print(f"  {title}")
+    print(f"{'═' * 65}")
+
+
+def banner(config):
+    gpu_str = 'ENABLED' if config.use_gpu else 'DISABLED (use --gpu)'
+    print("╔══════════════════════════════════════════════════════════════════╗")
+    print("║  MAESTRO SHOWCASE: MPS                                         ║")
+    print("║  Accuracy vs Resources — Who Wins?                             ║")
+    print("╠══════════════════════════════════════════════════════════════════╣")
+    print(f"║  Lattice: {config.lx}×{config.ly} = {config.n_qubits} qubits"
+          f"{'':>{50 - len(str(config.lx)) - len(str(config.ly)) - len(str(config.n_qubits))}}║")
+    print(f"║  GPU mode: {gpu_str:{52}s}║")
+    print("╚══════════════════════════════════════════════════════════════════╝")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Config builder
+# ─────────────────────────────────────────────────────────────────────
+
+def build_config():
+    """Parse CLI args and return Config."""
+    use_gpu = '--gpu' in sys.argv
+    small = '--small' in sys.argv
+    big = '--big' in sys.argv
+    chain = '--chain' in sys.argv
+
+    if small:
+        if chain:
+            return Config(
+                lx=16, ly=1,
+                n_trotter_steps=6,
+                chi_low=16, chi_high=32,
+                use_gpu=use_gpu,
+            )
+        else:
+            return Config(
+                lx=4, ly=4,
+                n_trotter_steps=6,
+                chi_low=16, chi_high=32,
+                use_gpu=use_gpu,
+            )
+    elif big:
+        if chain:
+            return Config(
+                lx=64, ly=1,
+                n_trotter_steps=10,
+                chi_low=16, chi_high=128,
+                use_gpu=use_gpu,
+            )
+        else:
+            return Config(
+                lx=8, ly=8,
+                n_trotter_steps=10,
+                chi_low=16, chi_high=128,
+                use_gpu=use_gpu,
+            )
+    else:
+        if chain:
+            return Config(
+                lx=36, ly=1,
+                n_trotter_steps=8,
+                chi_low=16, chi_high=64,
+                use_gpu=use_gpu,
+            )
+        else:
+            return Config(
+                lx=6, ly=6,
+                n_trotter_steps=8,
+                chi_low=16, chi_high=64,
+                use_gpu=use_gpu,
+            )
+
+# ─────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    config = build_config()
+    banner(config)
+    total_start = time.time()
+
+    small = '--small' in sys.argv
+    chain = '--chain' in sys.argv
+    n = config.n_qubits
+    bonds = get_nn_bonds(config.lx, config.ly)
+
+    # ── Observable: ZZ on the central bond ──
+    cx, cy = config.lx // 2, config.ly // 2
+    q_i = site_index(cx, cy, config.ly)
+    q_j = site_index(cx, cy + 1, config.ly)
+    obs_dict = {q_i: PAULI_Z, q_j: PAULI_Z}
+    obs_str = build_pauli_observable(n, {q_i: 'Z', q_j: 'Z'})
+    fixed_depth = config.n_trotter_steps
+
+    print(f"\n  Observable: ⟨Z_{q_i} Z_{q_j}⟩  "
+          f"(central bond at ({cx},{cy})↔({cx},{cy+1}))")
+    print(f"  Trotter depth: {fixed_depth}  |  dt = {config.dt:.4f}")
+
+    # ── Act 1: Reference value (cached) ──
+    header("ACT 1: REFERENCE VALUE")
+    if chain:
+        ref_label = """exact value known: \n
+                        ⟨Z_i Z_{i+1}⟩ = -Γ_{2i+1, 2i+2}          (nearest-neighbour, simplest case) \n                                                                                                                                                     │)
+                        ⟨Z_i Z_j⟩ = Pfaffian(Γ_{2i+1..2j, 2i+1..2j})   (general case, Wick's theorem)  """
+    else:
+        ref_label = "exact statevector " if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
+
+    cache_key = hashlib.md5(
+        f"{config.lx},{config.ly},{config.j_coupling},{config.h_field},"
+        f"{config.t_total},{config.n_trotter_steps},{obs_str}".encode()
+    ).hexdigest()
+    cache_path = os.path.join(SCRIPT_DIR, '.reference_cache.json')
+
+    cache = {}
+    if os.path.exists(cache_path):
+        with open(cache_path) as f:
+            cache = json.load(f)
+
+    if cache_key in cache:
+        ref_value = cache[cache_key]
+        print(f"  Loaded from cache ({ref_label})")
+        ref_time = 0.0
+    else:
+        print(f"  Computing via {ref_label} ...")
+        t0 = time.time()
+        ref_value = compute_reference(config, fixed_depth, bonds, obs_str)
+        ref_time = time.time() - t0
+        cache[cache_key] = ref_value
+        with open(cache_path, 'w') as f:
+            json.dump(cache, f)
+        print(f"  Cached for future runs.")
+
+    print(f"\n  ⟨Z_{q_i} Z_{q_j}⟩ = {ref_value:+.6f}"
+          + (f"  ({ref_time:.2f}s)" if ref_time else "  (cached)"))
+
+    # ── Act 2: MPS accuracy sweep ──
+    header("ACT 2: MPS — Accuracy vs Bond Dimension χ")
+    if small:
+        chi_values = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    else:
+        chi_values = range(128, 513, 16)
+
+    print(f"  χ values: {chi_values}")
+    reference_parameter = "exact" if chain else "statevector" if n <= SV_LIMIT else f"MPS chi={config.chi_high * 2}"
+    print(f"  Reference {reference_parameter}\n")
+
+    t0 = time.time()
+    mps_results = sweep_mps_accuracy(
+        config, fixed_depth, bonds, obs_str, ref_value, chi_values
+    )
+    mps_time = time.time() - t0
+
+    print(f"  Done in {mps_time:.1f}s")
+    print(f"\n  {'χ':>6}  {'⟨ZZ⟩':>12}  {'MAE':>10}  {'Time(s)':>10}")
+    print(f"  {'──':>6}  {'────':>12}  {'──────────':>10}  {'──────────':>10}")
+    for r in mps_results:
+        print(f"  {r['chi']:>6d}  {r['value']:>+12.6f}  {r['mae']:>10.6f}  {r['elapsed']:>10.3f}")
+
+    # ── Act 4: Plot + summary ──
+    header("VISUALIZING THE COMPARISON")
+    obs_label = f'⟨Z_{q_i} Z_{q_j}⟩'
+    file_name = "accuracy_vs_resources_mps" + small * "_small" + chain * "_chain" + config.use_gpu * "_gpu"
+    plot_path = plot_one(
+        mps_results,
+        obs_label, ref_value, config,
+        os.path.join(SCRIPT_DIR, f"{file_name}.png"),
+    )
+    print(f"  Saved: {plot_path}")
+
+    # Summary
+    # eps = 0.05
+    # m_thresh = next((r['m'] for r in shadow_results if r['mae'] < eps), None)
+    # chi_thresh = next((r['chi'] for r in mps_results if r['mae'] < eps), None)
+
+    total_elapsed = time.time() - total_start
+
+    header("SUMMARY")
+    print(f"  System: {config.lx}×{config.ly} = {n} qubits | depth = {fixed_depth}")
+    print(f"  GPU: {'Yes' if config.use_gpu else 'No'}")
+    print(f"  Reference ⟨Z_{q_i} Z_{q_j}⟩ = {ref_value:+.6f}  ({ref_label})")
+    print(f"  Total runtime: {total_elapsed:.1f}s\n")
+
+
+    print(f"\n  Plot: {plot_path}")
