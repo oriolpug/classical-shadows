@@ -33,6 +33,31 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Results serialization
+# ─────────────────────────────────────────────────────────────────────
+
+def _save_results_json(path, config, obs_label, ref_value, mps_results=None, shadow_results=None):
+    """Save sweep results to a JSON file for later combination or replay."""
+    data = {
+        'config': {
+            'lx': config.lx, 'ly': config.ly,
+            'j_coupling': config.j_coupling, 'h_field': config.h_field,
+            't_total': config.t_total, 'n_trotter_steps': config.n_trotter_steps,
+            'chi_low': config.chi_low, 'chi_high': config.chi_high,
+            'use_gpu': config.use_gpu,
+        },
+        'obs_label': obs_label,
+        'ref_value': ref_value,
+    }
+    if mps_results is not None:
+        data['mps_results'] = mps_results
+    if shadow_results is not None:
+        data['shadow_results'] = shadow_results
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Printing helpers
 # ─────────────────────────────────────────────────────────────────────
 
@@ -133,7 +158,8 @@ if __name__ == '__main__':
     obs_str = build_pauli_observable(n, {q_i: 'Z', q_j: 'Z'})
     fixed_depth = config.n_trotter_steps
 
-    print(f"\n  Observable: ⟨Z_{q_i} Z_{q_j}⟩  "
+    obs_label = f'⟨Z_{q_i} Z_{q_j}⟩'
+    print(f"\n  Observable: {obs_label}  "
           f"(central bond at ({cx},{cy})↔({cx},{cy+1}))")
     print(f"  Trotter depth: {fixed_depth}  |  dt = {config.dt:.4f}")
 
@@ -197,6 +223,12 @@ if __name__ == '__main__':
     for r in mps_results:
         print(f"  {r['chi']:>6d}  {r['value']:>+12.6f}  {r['mae']:>10.6f}  {r['elapsed']:>10.3f}")
 
+    _save_results_json(
+        os.path.join(SCRIPT_DIR, 'results_mps.json'),
+        config, obs_label, ref_value, mps_results=mps_results,
+    )
+    print(f"  Saved: results_mps.json")
+
     shadows_limit_time = 2 * mps_time
 
     # ── Act 3: Shadow accuracy sweep ──
@@ -222,9 +254,14 @@ if __name__ == '__main__':
     for r in shadow_results:
         print(f"  {r['m']:>6d}  {r['mean']:>+12.6f}  {r['std_err']:>10.6f}  {r['mae']:>10.6f}")
 
+    _save_results_json(
+        os.path.join(SCRIPT_DIR, 'results_shadows.json'),
+        config, obs_label, ref_value, shadow_results=shadow_results,
+    )
+    print(f"  Saved: results_shadows.json")
+
     # ── Act 4: Plot + summary ──
     header("ACT 4: VISUALIZING THE COMPARISON")
-    obs_label = f'⟨Z_{q_i} Z_{q_j}⟩'
     plot_path = plot_accuracy_vs_resources(
         shadow_results, mps_results,
         obs_label, ref_value, config,
