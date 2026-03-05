@@ -435,6 +435,8 @@ def sweep_mps_accuracy(
         qc = build_tfim_trotter_circuit(
             n, bonds, config.j_coupling, config.h_field, config.dt, n_steps
         )
+
+        print(f"chi = {chi}...")
         t0 = time.time()
         res = qc.estimate(
             simulator_type=config.simulator_type,
@@ -443,6 +445,7 @@ def sweep_mps_accuracy(
             max_bond_dimension=chi,
         )
         elapsed = time.time() - t0
+        print(f"  done in {elapsed} s")
         value = float(res['expectation_values'][0])
         mae = abs(value - ref_value)
         results.append({'chi': chi, 'value': value, 'mae': mae, 'elapsed': elapsed})
@@ -578,76 +581,58 @@ def plot_one(
       Right: MAE vs χ (bond dimension), log-log. Rapid convergence.
     Both panels share the same y-axis range so the gap is obvious.
     """
-    fig, ax = plt.subplots(1, 1, figsize=(13, 5.5))
+    is_mps = 'chi' in data[0]
 
-    maes = [max(r['mae'], 1e-8) for r in data]
+    fig, ax = plt.subplots(1, 1, figsize=(6.5, 5.5))
+
+    maes  = [max(r['mae'], 1e-8) for r in data]
     times = [r['elapsed'] for r in data]
-    if 'chi' in data[0].keys():
-        ticks = [r['chi'] for r in data]
-    elif 'm' in data[0].keys():
-        ticks = [r['m'] for r in data]
-    else:
-        raise ValueError("Wrong data type passed")
+    ticks = [r['chi'] for r in data] if is_mps else [r['m'] for r in data]
 
-    ymin = min(maes) * 0.3
-    ymax = max(maes) * 4.0
+    color     = '#1565C0' if is_mps else '#7B1FA2'
+    marker    = 's-'      if is_mps else 'o-'
+    xlabel    = 'Bond dimension χ'          if is_mps else 'Shadow snapshots M'
+    time_lbl  = 'Time per estimate (s)'     if is_mps else 'Time for M snapshots (s)'
+    title     = (f'MPS: MAE vs χ\n({config.n_qubits} qubits, depth={config.n_trotter_steps})'
+                 if is_mps else
+                 f'Classical Shadows: MAE vs M\n'
+                 f'(depth={config.n_trotter_steps}, {config.lx}×{config.ly} TFIM)')
+    tick_lbls = ([str(c) for c in ticks] if is_mps
+                 else [str(int(m)) for m in ticks])
+
+    ymin  = min(maes)  * 0.3
+    ymax  = max(maes)  * 4.0
     t_max = max(times) * 1.15
 
-    TIME_COLOR = '#E65100'   # orange for time lines
+    TIME_COLOR = '#E65100'
 
-    def _add_time_axis(base_ax, x_vals, t_vals, time_label):
-        """Attach a right-side time axis with shared [0, t_max] scale."""
+    def _add_time_axis(base_ax, x_vals, t_vals, tlabel):
         axr = base_ax.twinx()
         axr.plot(x_vals, t_vals, 's--', color=TIME_COLOR, linewidth=1.5,
-                 markersize=6, alpha=0.8, label=time_label)
+                 markersize=6, alpha=0.8, label=tlabel)
         axr.set_ylabel('Time (s)', fontsize=10, color=TIME_COLOR)
         axr.tick_params(axis='y', labelcolor=TIME_COLOR)
         axr.set_ylim(0, t_max)
-
         return axr
 
-    # ── Left: MAE vs M (log-log) ──
-    ax.loglog(ticks, maes, 'o-', color='#7B1FA2', linewidth=2.5,
-               markersize=8, label='MAE')
-    M_arr = np.array(ticks, dtype=float)
-    ax.set_xlabel('Shadow snapshots M', fontsize=11)
+    ax.loglog(ticks, maes, marker, color=color, linewidth=2.5, markersize=8, label='MAE')
+    if not is_mps:
+        M_arr = np.array(ticks, dtype=float)
+        ref_curve = maes[0] * np.sqrt(ticks[0]) / np.sqrt(M_arr)
+        ax.loglog(M_arr, ref_curve, 'k--', alpha=0.4, linewidth=1.5, label='1/√M reference')
+
+    ax.set_xlabel(xlabel, fontsize=11)
     ax.set_ylabel('MAE vs reference', fontsize=11)
-    ax.set_title(
-        f'Classical Shadows: MAE vs M\n'
-        f'(depth={config.n_trotter_steps}, {config.lx}×{config.ly} TFIM)',
-        fontsize=11,
-    )
-    ax.set_xticks(M_arr)
-    ax.set_xticklabels([str(int(M)) for M in M_arr])
+    ax.set_title(title, fontsize=11)
+    ax.set_xticks(np.array(ticks, dtype=float))
+    ax.set_xticklabels(tick_lbls)
     ax.set_ylim(ymin, ymax)
     ax.grid(True, which='both', alpha=0.3)
-    ax_twin = _add_time_axis(ax, ticks, times, 'Time for M snapshots (s)')
+    ax_twin = _add_time_axis(ax, ticks, times, time_lbl)
 
-
-    lh, ll = ax.get_legend_handles_labels()
+    lh, ll   = ax.get_legend_handles_labels()
     lhr, llr = ax_twin.get_legend_handles_labels()
     ax.legend(lh + lhr, ll + llr, loc='best', fontsize=9)
-
-    # ── ε = 0.05 threshold line ──
-    # eps = 0.05
-    # if ymin < eps < ymax:
-    #     for ax in (ax1, ax2):
-    #         ax.axhline(y=eps, color='red', linestyle=':', alpha=0.6, linewidth=1.5)
-    #
-    #     ax1.text(m_vals[0] * 1.3, eps * 1.5, f'ε={eps}', color='red', fontsize=9)
-    #     ax2.text(chi_vals[0] * 1.3, eps * 1.5, f'ε={eps}', color='red', fontsize=9)
-
-    # ── Footer annotation ──
-    # m_thresh = next((r['m'] for r in shadow_results if r['mae'] < eps), None)
-    # chi_thresh = next((r['chi'] for r in mps_results if r['mae'] < eps), None)
-    # parts = []
-    # if m_thresh:
-    #     parts.append(f'Shadows reach ε={eps} at M={m_thresh}')
-    # if chi_thresh:
-    #     parts.append(f'MPS reaches ε={eps} at χ={chi_thresh}')
-    # if parts:
-    #     fig.text(0.5, 0.01, '  |  '.join(parts),
-    #              ha='center', fontsize=10, style='italic', color='#333333')
 
     fig.suptitle(
         f'Classical Shadows vs MPS — {obs_label} (central bond correlation) (ref = {ref_value:.4f})',
